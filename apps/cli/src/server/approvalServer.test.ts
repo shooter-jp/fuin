@@ -39,6 +39,19 @@ describe("approval server", () => {
     expect(body.approvalTokenHash).toBeUndefined();
   });
 
+  it("rejects traversal payment ids before reading payment storage", async () => {
+    tempHome = await createTempHome();
+    const app = createApprovalApp({ home: tempHome, port: TEST_PORT });
+
+    const response = await app.request(
+      `http://127.0.0.1:${TEST_PORT}/api/payments/..%2Fwallets%2Fdefault.wallet`,
+    );
+    const body = (await response.json()) as { error?: string };
+
+    expect(response.status).toBe(400);
+    expect(body.error).toBe("Invalid payment id");
+  });
+
   it("validates Host headers for read-only API routes", async () => {
     tempHome = await createTempHome();
     const payment = await createPendingPayment(tempHome);

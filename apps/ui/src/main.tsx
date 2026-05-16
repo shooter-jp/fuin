@@ -43,9 +43,20 @@ type HomeState = {
 function App() {
   const approvalParams = useMemo(() => {
     const match = /^\/approve\/([^/]+)$/.exec(window.location.pathname);
+    const url = new URL(window.location.href);
+    const token = url.searchParams.get("token") ?? "";
+    if (token) {
+      url.searchParams.delete("token");
+      const search = url.searchParams.toString();
+      window.history.replaceState(
+        window.history.state,
+        "",
+        `${url.pathname}${search ? `?${search}` : ""}${url.hash}`,
+      );
+    }
     return {
       paymentId: match?.[1],
-      token: new URLSearchParams(window.location.search).get("token") ?? "",
+      token,
     };
   }, []);
 
@@ -341,7 +352,7 @@ function ErrorText({ message }: { message: string }) {
 }
 
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, init);
+  const response = await fetch(url, { referrerPolicy: "no-referrer", ...init });
   const data = await response.json().catch(() => null);
   if (!response.ok) {
     throw new Error(data?.error ?? response.statusText);
