@@ -1,0 +1,35 @@
+{
+  "name": "@fuin/wallet",
+  "version": "0.1.0",
+  "type": "module",
+  "license": "Apache-2.0",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "fuin": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup && node scripts/copy-ui.mjs",
+    "dev": "tsx src/index.ts",
+    "postpack": "node scripts/clean-package-docs.mjs",
+    "prepack": "node scripts/copy-package-docs.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.19.6",
+    "commander": "^14.0.2",
+    "hono": "^4.12.19",
+    "viem": "^2.49.3",
+    "zod": "^4.1.13"
+  },
+  "devDependencies": {
+    "tsup": "^8.5.1",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3"
+  }
+}
