@@ -11,7 +11,7 @@ const PreparePaymentSchema = {
 };
 
 const PaymentStatusSchema = {
-  paymentId: z.string(),
+  paymentId: z.string().uuid(),
 };
 
 const ListPaymentsSchema = {

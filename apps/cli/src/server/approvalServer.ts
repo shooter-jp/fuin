@@ -9,6 +9,7 @@ import {
   decryptPrivateKey,
   fileExists,
   isValidApprovalToken,
+  isValidPaymentId,
   listPayments,
   markPaymentFailed,
   markPaymentSending,
@@ -140,12 +141,21 @@ export function createApprovalApp(
   });
 
   app.get("/api/payments/:paymentId", async (c) => {
-    const payment = await readPayment(c.req.param("paymentId"), options.home);
+    const paymentId = c.req.param("paymentId");
+    const invalidPaymentIdResponse = validatePaymentId(c, paymentId);
+    if (invalidPaymentIdResponse) {
+      return invalidPaymentIdResponse;
+    }
+    const payment = await readPayment(paymentId, options.home);
     return c.json(toPaymentResponse(payment));
   });
 
   app.post("/api/payments/:paymentId/reject", async (c) => {
     const paymentId = c.req.param("paymentId");
+    const invalidPaymentIdResponse = validatePaymentId(c, paymentId);
+    if (invalidPaymentIdResponse) {
+      return invalidPaymentIdResponse;
+    }
     const unlock = tryLockPayment(paymentLocks, paymentId);
     if (!unlock) {
       return c.json({ error: "Payment is already being processed" }, 409);
@@ -166,6 +176,10 @@ export function createApprovalApp(
 
   app.post("/api/payments/:paymentId/approve", async (c) => {
     const paymentId = c.req.param("paymentId");
+    const invalidPaymentIdResponse = validatePaymentId(c, paymentId);
+    if (invalidPaymentIdResponse) {
+      return invalidPaymentIdResponse;
+    }
     const unlock = tryLockPayment(paymentLocks, paymentId);
     if (!unlock) {
       return c.json({ error: "Payment is already being processed" }, 409);
@@ -253,6 +267,16 @@ async function readApprovalRequestBody(
   c: Context,
 ): Promise<ApprovalRequestBody> {
   return c.req.json<ApprovalRequestBody>().catch(() => ({}));
+}
+
+function validatePaymentId(
+  c: Context,
+  paymentId: string,
+): Response | undefined {
+  if (!isValidPaymentId(paymentId)) {
+    return c.json({ error: "Invalid payment id" }, 400);
+  }
+  return undefined;
 }
 
 function validatePaymentToken(

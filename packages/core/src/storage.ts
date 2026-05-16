@@ -110,7 +110,21 @@ export async function readDefaultWallet(
   return readJsonFile<EncryptedWallet>(getFuinPaths(home).wallet);
 }
 
+const PAYMENT_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+export function isValidPaymentId(paymentId: string): boolean {
+  return PAYMENT_ID_PATTERN.test(paymentId);
+}
+
+export function assertValidPaymentId(paymentId: string): void {
+  if (!isValidPaymentId(paymentId)) {
+    throw new Error("Invalid payment id");
+  }
+}
+
 export function paymentPath(paymentId: string, home?: string): string {
+  assertValidPaymentId(paymentId);
   return join(getFuinPaths(home).paymentsDir, `${paymentId}.json`);
 }
 

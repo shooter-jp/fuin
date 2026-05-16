@@ -18,8 +18,10 @@ export async function promptText(
 }
 
 export function promptHidden(question: string): Promise<string> {
-  if (!process.stdin.isTTY || !process.stderr.isTTY) {
-    return promptText(question);
+  if (!process.stdin.isTTY) {
+    return Promise.reject(
+      new Error("Hidden input requires an interactive terminal"),
+    );
   }
 
   return new Promise((resolve, reject) => {

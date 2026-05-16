@@ -6,6 +6,7 @@ import {
   atomicWriteJson,
   readConfig,
   readJsonFile,
+  readPayment,
   writeConfig,
   writeDefaultWallet,
   writeRuntime,
@@ -37,6 +38,13 @@ describe("storage", () => {
     const config = testConfig();
     await writeConfig(config, tempHome);
     await expect(readConfig(tempHome)).resolves.toEqual(config);
+  });
+
+  it("rejects payment ids that are not generated UUIDs", async () => {
+    tempHome = await createTempHome();
+    await expect(
+      readPayment("../wallets/default.wallet", tempHome),
+    ).rejects.toThrow(/Invalid payment id/);
   });
 
   it("redacts private keys, passphrases, and approval tokens from audit logs", async () => {
