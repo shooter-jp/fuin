@@ -1,0 +1,29 @@
+# Local secrets and machine-specific config
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# OS and editor noise
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Dependencies, build output, and logs
+node_modules/
+dist/
+build/
+.next/
+coverage/
+.cache/
+.tmp/
+*.log
+
+# Language/runtime caches
+__pycache__/
+.venv/
+target/

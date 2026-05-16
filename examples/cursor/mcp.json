@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "fuin": {
+      "command": "npx",
+      "args": ["-y", "@fuin/wallet", "mcp"]
+    }
+  }
+}
