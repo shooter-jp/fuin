@@ -9,6 +9,8 @@ No custody. No backend. Local-first. Open source.
 
 Fuin v0.1 is an MVP alpha. Use small amounts only. Base Sepolia is the default network, and Base mainnet support is an explicit opt-in that is not production-ready.
 
+If you lose `~/.fuin` or forget your passphrase, you may lose access to funds. Back up carefully and keep alpha wallets small.
+
 ## Quickstart
 
 1. Install / initialize
@@ -30,6 +32,8 @@ codex mcp add fuin -- npx -y @fuin/wallet mcp
 ```
 
 4. Send test funds to the address.
+
+Need test funds? Fund the wallet with Base Sepolia ETH for gas and Base Sepolia USDC before preparing a payment.
 
 5. Ask:
 
@@ -109,6 +113,11 @@ pnpm lint
 Package verification before release:
 
 ```sh
+pnpm install --frozen-lockfile
+pnpm build
+pnpm typecheck
+pnpm test
+pnpm lint
 pnpm --filter @fuin/wallet exec npm pack --dry-run --json
 ```
 
@@ -119,6 +128,9 @@ Release and supply-chain notes:
 - Verify package contents with `npm pack --dry-run`.
 - Use npm 2FA.
 - Use npm provenance where available.
+- Publish alpha builds with `pnpm --filter @fuin/wallet exec npm publish --tag alpha --provenance`.
+
+See [docs/release.md](docs/release.md) for the release checklist.
 
 Optional RPC overrides:
 

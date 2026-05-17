@@ -4,6 +4,7 @@ import {
   readPayment,
   writeConfig,
   writeDefaultWallet,
+  writePayment,
 } from "@fuin/core";
 import { afterEach, describe, expect, it } from "vitest";
 import {
@@ -16,6 +17,12 @@ import { createApprovalApp } from "./approvalServer.js";
 const TEST_PORT = 8787;
 const TEST_TX_HASH =
   "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const HEALTHY_BALANCES = {
+  eth: "0.01",
+  ethRaw: 10_000_000_000_000_000n,
+  usdc: "1.00",
+  usdcRaw: 1_000_000n,
+};
 
 let tempHome: string | undefined;
 
@@ -116,6 +123,7 @@ describe("approval server", () => {
     const passphrase = "correct horse battery staple";
     const payment = await createPendingPaymentWithWallet(tempHome, passphrase);
     const app = createApprovalApp({
+      getBalances: async () => HEALTHY_BALANCES,
       home: tempHome,
       port: TEST_PORT,
       sendUsdcTransfer: async () => TEST_TX_HASH,
@@ -151,6 +159,7 @@ describe("approval server", () => {
       finishSend = resolve;
     });
     const app = createApprovalApp({
+      getBalances: async () => HEALTHY_BALANCES,
       home: tempHome,
       port: TEST_PORT,
       sendUsdcTransfer: async () => {
@@ -180,6 +189,112 @@ describe("approval server", () => {
     await expect(readPayment(payment.id, tempHome)).resolves.toMatchObject({
       status: "sent",
       txHash: TEST_TX_HASH,
+    });
+  });
+
+  it("re-checks USDC balance before approving", async () => {
+    tempHome = await createTempHome();
+    const passphrase = "correct horse battery staple";
+    const payment = await createPendingPaymentWithWallet(tempHome, passphrase);
+    let sent = false;
+    const app = createApprovalApp({
+      getBalances: async () => ({
+        ...HEALTHY_BALANCES,
+        usdc: "0.10",
+        usdcRaw: 100_000n,
+      }),
+      home: tempHome,
+      port: TEST_PORT,
+      sendUsdcTransfer: async () => {
+        sent = true;
+        return TEST_TX_HASH;
+      },
+    });
+
+    const response = await postJson(app, `${paymentUrl(payment.id)}/approve`, {
+      passphrase,
+      token: payment.approvalToken,
+    });
+    const body = (await response.json()) as { error?: string };
+
+    expect(response.status).toBe(400);
+    expect(body.error).toContain("Insufficient USDC balance before approval");
+    expect(sent).toBe(false);
+    await expect(readPayment(payment.id, tempHome)).resolves.toMatchObject({
+      status: "requires_human_approval",
+    });
+  });
+
+  it("re-checks ETH gas availability before approving", async () => {
+    tempHome = await createTempHome();
+    const passphrase = "correct horse battery staple";
+    const payment = await createPendingPaymentWithWallet(tempHome, passphrase);
+    let sent = false;
+    const app = createApprovalApp({
+      getBalances: async () => ({
+        ...HEALTHY_BALANCES,
+        eth: "0",
+        ethRaw: 0n,
+      }),
+      home: tempHome,
+      port: TEST_PORT,
+      sendUsdcTransfer: async () => {
+        sent = true;
+        return TEST_TX_HASH;
+      },
+    });
+
+    const response = await postJson(app, `${paymentUrl(payment.id)}/approve`, {
+      passphrase,
+      token: payment.approvalToken,
+    });
+    const body = (await response.json()) as { error?: string };
+
+    expect(response.status).toBe(400);
+    expect(body.error).toContain("ETH balance is likely too low");
+    expect(sent).toBe(false);
+    await expect(readPayment(payment.id, tempHome)).resolves.toMatchObject({
+      status: "requires_human_approval",
+    });
+  });
+
+  it("marks payment failed if protected payment fields change during approval", async () => {
+    tempHome = await createTempHome();
+    const passphrase = "correct horse battery staple";
+    const payment = await createPendingPaymentWithWallet(tempHome, passphrase);
+    let sent = false;
+    const app = createApprovalApp({
+      getBalances: async () => {
+        const current = await readPayment(payment.id, tempHome);
+        await writePayment(
+          {
+            ...current,
+            to: "0x3333333333333333333333333333333333333333",
+          },
+          tempHome,
+        );
+        return HEALTHY_BALANCES;
+      },
+      home: tempHome,
+      port: TEST_PORT,
+      sendUsdcTransfer: async () => {
+        sent = true;
+        return TEST_TX_HASH;
+      },
+    });
+
+    const response = await postJson(app, `${paymentUrl(payment.id)}/approve`, {
+      passphrase,
+      token: payment.approvalToken,
+    });
+    const body = (await response.json()) as { error?: string };
+
+    expect(response.status).toBe(409);
+    expect(body.error).toContain("Payment changed during approval");
+    expect(sent).toBe(false);
+    await expect(readPayment(payment.id, tempHome)).resolves.toMatchObject({
+      status: "failed",
+      error: "Payment changed during approval; refusing to send.",
     });
   });
 

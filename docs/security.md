@@ -2,6 +2,8 @@
 
 Fuin Wallet v0.1 is an MVP alpha. Use small amounts only. Base Sepolia is the default network. Base mainnet is an explicit opt-in and is not production-ready.
 
+If you lose `~/.fuin` or forget your passphrase, you may lose access to funds. Fuin does not have a hosted recovery service.
+
 Fuin is local-first. It has no hosted backend, no telemetry, no analytics, no cloud sync, and no remote signing service.
 
 The local wallet private key is encrypted with Node crypto using `scrypt` and `AES-256-GCM`. The passphrase is required to decrypt the private key and is never stored.

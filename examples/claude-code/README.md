@@ -1,7 +1,7 @@
 # Claude Code
 
 ```sh
-claude mcp add fuin -- npx -y @fuin/wallet mcp
+claude mcp add --transport stdio fuin -- npx -y @fuin/wallet mcp
 ```
 
 Then ask Claude Code:

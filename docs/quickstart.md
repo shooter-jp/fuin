@@ -6,6 +6,8 @@ Initialize a local Fuin wallet:
 npx @fuin/wallet init
 ```
 
+If you lose `~/.fuin` or forget your passphrase, you may lose access to funds. Use small amounts only in this alpha.
+
 Connect Codex:
 
 ```sh
@@ -18,7 +20,7 @@ Ask Codex:
 What is your wallet address?
 ```
 
-Fund the address with Base Sepolia ETH for gas and Base Sepolia USDC. Then ask:
+Fund the address with Base Sepolia ETH for gas and Base Sepolia USDC. Use test funds on Base Sepolia before preparing a payment. Then ask:
 
 ```text
 What is your balance?

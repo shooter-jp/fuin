@@ -142,7 +142,9 @@ program
       return;
     }
     if (client === "claude") {
-      console.log("claude mcp add fuin -- npx -y @fuin/wallet mcp");
+      console.log(
+        "claude mcp add --transport stdio fuin -- npx -y @fuin/wallet mcp",
+      );
       return;
     }
     if (client === "cursor") {

@@ -32,6 +32,9 @@ describe("@fuin/wallet package", () => {
       }
       const files = new Set(pack.files.map((file) => file.path));
       const manifest = readFileSync(resolve(cliRoot, "package.json"), "utf8");
+      const packageJson = JSON.parse(manifest) as {
+        dependencies?: Record<string, string>;
+      };
       const bin = readFileSync(distIndex, "utf8");
 
       expect(files).toContain("README.md");
@@ -39,6 +42,10 @@ describe("@fuin/wallet package", () => {
       expect(files).toContain("dist/index.js");
       expect(files).toContain("dist/ui/index.html");
       expect(manifest).not.toContain("workspace:*");
+      expect(
+        packageJson.dependencies?.["@modelcontextprotocol/sdk"] !== undefined ||
+          !bin.includes("@modelcontextprotocol/sdk"),
+      ).toBe(true);
       expect(bin.startsWith("#!/usr/bin/env node")).toBe(true);
       if (process.platform !== "win32") {
         expect(statSync(distIndex).mode & 0o111).not.toBe(0);
