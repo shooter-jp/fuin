@@ -1,4 +1,4 @@
-import { StrictMode, useEffect, useMemo, useState } from "react";
+import { StrictMode, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
 
@@ -38,6 +38,18 @@ type HomeState = {
   balanceError?: string;
   pendingPayments: Payment[];
   recentPayments: Payment[];
+};
+
+const STATUS_META: Record<PaymentStatus, { label: string; variant: string }> = {
+  requires_human_approval: {
+    label: "Needs approval",
+    variant: "requires_human_approval",
+  },
+  approved: { label: "Approved", variant: "approved" },
+  sending: { label: "Sending", variant: "sending" },
+  sent: { label: "Sent", variant: "sent" },
+  rejected: { label: "Rejected", variant: "rejected" },
+  failed: { label: "Failed", variant: "failed" },
 };
 
 function App() {
@@ -91,20 +103,20 @@ function HomePage() {
   if (!state) {
     return (
       <Shell title="Fuin Wallet">
-        <p>Loading...</p>
+        <p className="empty">Loading...</p>
       </Shell>
     );
   }
 
   return (
     <Shell title="Fuin Wallet">
-      <section className="summaryGrid">
-        <Info label="Agent" value={state.agentName} />
-        <Info label="Network" value={networkLabel(state.network)} />
-        <Info label="Address" value={state.address} mono />
-        <Info label="USDC" value={state.balances.usdc} />
-        <Info label="ETH" value={state.balances.eth} />
-      </section>
+      <HeroBalance
+        agentName={state.agentName}
+        network={state.network}
+        address={state.address}
+        usdc={state.balances.usdc}
+        eth={state.balances.eth}
+      />
 
       {state.balanceError ? (
         <p className="warning">Balance lookup failed: {state.balanceError}</p>
@@ -193,7 +205,7 @@ function ApprovalPage({
   if (!payment) {
     return (
       <Shell title="Approve payment">
-        <p>Loading...</p>
+        <p className="empty">Loading...</p>
       </Shell>
     );
   }
@@ -202,23 +214,40 @@ function ApprovalPage({
 
   return (
     <Shell title="Approve payment">
+      <section className="approvalHero card">
+        <AmountDisplay amountUsd={payment.amountUsd} asset={payment.asset} />
+        <div className="approvalHero__sub">
+          <StatusBadge status={payment.status} />
+          <span>{networkLabel(payment.network)}</span>
+          {payment.fromAgentName ? (
+            <span>via {payment.fromAgentName}</span>
+          ) : null}
+        </div>
+      </section>
+
       <section className="approvalPanel">
-        <Info label="Agent" value={payment.fromAgentName ?? "Fuin Agent"} />
-        <Info label="Amount" value={`$${payment.amountUsd}`} />
+        <Info
+          label="Recipient"
+          value={payment.to}
+          mono
+          action={<CopyButton value={payment.to} label="address" />}
+        />
         <Info label="Asset" value={payment.asset} />
-        <Info label="Recipient" value={payment.to} mono />
-        <Info label="Network" value={networkLabel(payment.network)} />
         <Info label="Reason" value={payment.reason || "No reason provided"} />
-        <Info label="Status" value={payment.status} />
         {payment.txHash ? (
-          <Info label="Tx hash" value={payment.txHash} mono />
+          <Info
+            label="Tx hash"
+            value={payment.txHash}
+            mono
+            action={<CopyButton value={payment.txHash} label="tx hash" />}
+          />
         ) : null}
         {payment.error ? (
           <p className="warning">Error: {payment.error}</p>
         ) : null}
       </section>
 
-      <section className="riskBox">
+      <section className="riskBox card">
         <h2>Risk warnings</h2>
         <ul>
           <li>This sends USDC on {networkLabel(payment.network)}.</li>
@@ -290,17 +319,157 @@ function Info({
   label,
   mono,
   value,
+  action,
 }: {
   label: string;
   mono?: boolean;
   value: string;
+  action?: React.ReactNode;
 }) {
   return (
     <div className="info">
-      <dt>{label}</dt>
-      <dd className={mono ? "mono" : undefined}>{value}</dd>
+      <div className="info__row">
+        <div className="info__main">
+          <dt>{label}</dt>
+          <dd className={mono ? "mono" : undefined}>{value}</dd>
+        </div>
+        {action ? <div className="info__action">{action}</div> : null}
+      </div>
     </div>
   );
+}
+
+function HeroBalance({
+  agentName,
+  network,
+  address,
+  usdc,
+  eth,
+}: {
+  agentName: string;
+  network: HomeState["network"];
+  address: string;
+  usdc: string;
+  eth: string;
+}) {
+  return (
+    <section className="hero card">
+      <div className="heroTopRow">
+        <span className="heroAgent">{agentName}</span>
+        <span className="networkChip">{networkLabel(network)}</span>
+      </div>
+      <div className="heroAmount">
+        <span className="heroAmount__symbol">$</span>
+        <span>{usdc}</span>
+        <span className="heroAmount__unit">USDC</span>
+      </div>
+      <div className="heroAmount__label">USDC balance</div>
+      <div className="heroSecondary">
+        <div className="heroSecondary__item">
+          <span className="heroSecondary__label">ETH balance</span>
+          <span className="heroSecondary__value">{eth}</span>
+        </div>
+        <div className="heroSecondary__item">
+          <span className="heroSecondary__label">Address</span>
+          <span className="heroSecondary__value">
+            <span className="mono">{shorten(address)}</span>
+            <CopyButton value={address} label="address" />
+          </span>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function AmountDisplay({
+  amountUsd,
+  asset,
+}: {
+  amountUsd: string;
+  asset: string;
+}) {
+  return (
+    <div className="amountDisplay">
+      <span className="amountDisplay__symbol">$</span>
+      <span>{amountUsd}</span>
+      <span className="amountDisplay__asset">{asset}</span>
+    </div>
+  );
+}
+
+function StatusBadge({ status }: { status: PaymentStatus }) {
+  const meta = STATUS_META[status];
+  return (
+    <span className={`badge badge--${meta.variant}`}>
+      <span className="badge__dot" aria-hidden="true" />
+      {meta.label}
+    </span>
+  );
+}
+
+function CopyButton({
+  value,
+  label = "Copy",
+}: {
+  value: string;
+  label?: string;
+}) {
+  const [copied, setCopied] = useState(false);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+    };
+  }, []);
+
+  async function handleClick() {
+    let ok = false;
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(value);
+        ok = true;
+      } else {
+        ok = fallbackCopy(value);
+      }
+    } catch {
+      ok = fallbackCopy(value);
+    }
+    if (!ok) return;
+    setCopied(true);
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    timeoutRef.current = setTimeout(() => setCopied(false), 1500);
+  }
+
+  return (
+    <button
+      type="button"
+      className={`copyButton${copied ? " copyButton--copied" : ""}`}
+      aria-label={`Copy ${label}`}
+      onClick={handleClick}
+    >
+      <span aria-live="polite">{copied ? "Copied" : "Copy"}</span>
+    </button>
+  );
+}
+
+function fallbackCopy(value: string): boolean {
+  try {
+    const textarea = document.createElement("textarea");
+    textarea.value = value;
+    textarea.setAttribute("readonly", "");
+    textarea.style.position = "absolute";
+    textarea.style.left = "-9999px";
+    document.body.appendChild(textarea);
+    textarea.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(textarea);
+    return ok;
+  } catch {
+    return false;
+  }
 }
 
 function PaymentList({
@@ -311,7 +480,7 @@ function PaymentList({
   payments: Payment[];
 }) {
   if (payments.length === 0) {
-    return <p>{empty}</p>;
+    return <p className="empty">{empty}</p>;
   }
 
   return (
@@ -338,11 +507,13 @@ function PaymentList({
 function PaymentRowContent({ payment }: { payment: Payment }) {
   return (
     <>
-      <span>
+      <span className="paymentRow__amount">
         ${payment.amountUsd} {payment.asset}
       </span>
-      <span className="mono">{shorten(payment.to)}</span>
-      <span>{payment.status}</span>
+      <span className="paymentRow__address">{shorten(payment.to)}</span>
+      <span className="paymentRow__status">
+        <StatusBadge status={payment.status} />
+      </span>
     </>
   );
 }

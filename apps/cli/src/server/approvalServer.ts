@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -14,10 +15,12 @@ import {
   markPaymentFailed,
   markPaymentSending,
   markPaymentSent,
+  parseUsdAmountToUsdcUnits,
   readConfig,
   readDefaultWallet,
   readPayment,
   rejectPayment,
+  validateEvmAddress,
   writeRuntime,
 } from "@fuin/core";
 import { serve } from "@hono/node-server";
@@ -43,6 +46,9 @@ type ApprovalRequestBody = {
   token?: string;
 };
 
+const LOW_GAS_APPROVAL_THRESHOLD_WEI = 50_000_000_000_000n;
+
+type GetBalances = typeof getBalances;
 type SendUsdcTransfer = typeof sendUsdcTransfer;
 
 export async function startApprovalServer(
@@ -85,10 +91,12 @@ export function createApprovalApp(
   options: {
     home?: string;
     port?: number;
+    getBalances?: GetBalances;
     sendUsdcTransfer?: SendUsdcTransfer;
   } = {},
 ) {
   const app = new Hono();
+  const balanceReader = options.getBalances ?? getBalances;
   const chainSender = options.sendUsdcTransfer ?? sendUsdcTransfer;
   const paymentLocks = new Set<string>();
 
@@ -107,7 +115,7 @@ export function createApprovalApp(
       (payment) => payment.status === "requires_human_approval",
     );
     try {
-      const balances = await getBalances(config.network, config.address);
+      const balances = await balanceReader(config.network, config.address);
       return c.json({
         agentName: config.agentName,
         address: config.address,
@@ -185,7 +193,7 @@ export function createApprovalApp(
       return c.json({ error: "Payment is already being processed" }, 409);
     }
 
-    let enteredSendPath = false;
+    let approvalRecorded = false;
     try {
       const body = await readApprovalRequestBody(c);
       const current = await readPayment(paymentId, options.home);
@@ -204,14 +212,22 @@ export function createApprovalApp(
       }
 
       const wallet = await readDefaultWallet(options.home);
+      const revalidatedPayment = await revalidatePaymentBeforeApproval({
+        getBalances: balanceReader,
+        home: options.home,
+        paymentId,
+        token: body.token,
+        walletAddress: wallet.address,
+      });
       const privateKey = await decryptPrivateKey(wallet, body.passphrase);
       const approved = await approvePayment(
         paymentId,
         options.home,
         body.token,
       );
+      approvalRecorded = true;
+      assertPaymentUnchangedForSend(revalidatedPayment, approved);
       await markPaymentSending(approved.id, options.home);
-      enteredSendPath = true;
       const txHash = await chainSender({
         amountUsd: approved.amountUsd,
         network: approved.network,
@@ -222,7 +238,7 @@ export function createApprovalApp(
       return c.json({ payment: toPaymentResponse(sent) });
     } catch (error) {
       const message = errorMessage(error);
-      if (enteredSendPath) {
+      if (approvalRecorded) {
         try {
           await markPaymentFailed(paymentId, message, options.home);
         } catch {
@@ -233,7 +249,7 @@ export function createApprovalApp(
           );
         }
       }
-      return c.json({ error: message }, 500);
+      return c.json({ error: message }, errorStatus(error));
     } finally {
       unlock();
     }
@@ -291,6 +307,132 @@ function validatePaymentToken(
     return c.json({ error: "Invalid approval token" }, 403);
   }
   return undefined;
+}
+
+async function revalidatePaymentBeforeApproval(input: {
+  paymentId: string;
+  token: string | undefined;
+  walletAddress: string;
+  home: string | undefined;
+  getBalances: GetBalances;
+}): Promise<PaymentRequest> {
+  const payment = await readPayment(input.paymentId, input.home);
+  if (!input.token) {
+    throw new ApprovalRequestError("Approval token is required", 401);
+  }
+  if (!isValidApprovalToken(payment, input.token)) {
+    throw new ApprovalRequestError("Invalid approval token", 403);
+  }
+  if (payment.status !== "requires_human_approval") {
+    throw new ApprovalRequestError(
+      `Payment is ${payment.status} and cannot be approved`,
+      409,
+    );
+  }
+
+  assertSupportedPaymentAsset(payment.asset);
+  const network = requireSupportedPaymentNetwork(payment.network);
+  const to = requireEvmAddress(payment.to, "Payment recipient");
+  const fromAddress = requireEvmAddress(payment.fromAddress, "Payment sender");
+  const amountUnits = requireUsdcAmount(payment.amountUsd);
+
+  if (fromAddress.toLowerCase() !== input.walletAddress.toLowerCase()) {
+    throw new ApprovalRequestError(
+      "Payment was created for a different wallet address.",
+      409,
+    );
+  }
+
+  let balances: Awaited<ReturnType<GetBalances>>;
+  try {
+    balances = await input.getBalances(network, fromAddress);
+  } catch (error) {
+    throw new ApprovalRequestError(
+      `Unable to re-check balances before approval: ${errorMessage(error)}`,
+      502,
+    );
+  }
+
+  if (balances.usdcRaw < amountUnits) {
+    throw new ApprovalRequestError(
+      `Insufficient USDC balance before approval. Available ${balances.usdc} USDC.`,
+      400,
+    );
+  }
+
+  if (balances.ethRaw < LOW_GAS_APPROVAL_THRESHOLD_WEI) {
+    throw new ApprovalRequestError(
+      `ETH balance is likely too low to pay gas for this USDC transfer. Available ${balances.eth} ETH.`,
+      400,
+    );
+  }
+
+  return { ...payment, network, to, fromAddress };
+}
+
+function assertPaymentUnchangedForSend(
+  beforeApproval: PaymentRequest,
+  approved: PaymentRequest,
+): void {
+  const protectedFields: Array<keyof PaymentRequest> = [
+    "id",
+    "fromAddress",
+    "to",
+    "amountUsd",
+    "asset",
+    "network",
+  ];
+  for (const field of protectedFields) {
+    if (approved[field] !== beforeApproval[field]) {
+      throw new ApprovalRequestError(
+        "Payment changed during approval; refusing to send.",
+        409,
+      );
+    }
+  }
+}
+
+function assertSupportedPaymentAsset(asset: unknown): asserts asset is "USDC" {
+  if (asset !== "USDC") {
+    throw new ApprovalRequestError(
+      `Unsupported payment asset: ${String(asset)}. Only USDC is supported.`,
+      400,
+    );
+  }
+}
+
+function requireSupportedPaymentNetwork(
+  network: unknown,
+): PaymentRequest["network"] {
+  if (network === "base-sepolia" || network === "base") {
+    return network;
+  }
+  throw new ApprovalRequestError(
+    `Unsupported payment network: ${String(network)}`,
+    400,
+  );
+}
+
+function requireEvmAddress(address: string, label: string): string {
+  try {
+    return validateEvmAddress(address);
+  } catch {
+    throw new ApprovalRequestError(
+      `${label} must be a valid EVM address.`,
+      400,
+    );
+  }
+}
+
+function requireUsdcAmount(amountUsd: string): bigint {
+  try {
+    return parseUsdAmountToUsdcUnits(amountUsd);
+  } catch (error) {
+    throw new ApprovalRequestError(
+      `Invalid payment amount: ${errorMessage(error)}`,
+      400,
+    );
+  }
 }
 
 function validateLocalApiRequest(
@@ -355,9 +497,36 @@ function resolveUiRoot(): string {
     return resolve(process.env.FUIN_UI_DIST);
   }
   const here = dirname(fileURLToPath(import.meta.url));
-  return resolve(here, "../ui");
+  const bundledUiRoot = resolve(here, "ui");
+  const candidates = [
+    // Bundled CLI: apps/cli/dist/index.js -> apps/cli/dist/ui
+    bundledUiRoot,
+    // Unbundled CLI: apps/cli/dist/server/approvalServer.js -> apps/cli/dist/ui
+    resolve(here, "../ui"),
+    // Local tsx dev: apps/cli/src/server/approvalServer.ts -> apps/ui/dist
+    resolve(here, "../../../ui/dist"),
+  ];
+  return candidates.find(hasBuiltUi) ?? bundledUiRoot;
 }
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function errorStatus(error: unknown): 400 | 401 | 403 | 409 | 500 | 502 {
+  return error instanceof ApprovalRequestError ? error.status : 500;
+}
+
+class ApprovalRequestError extends Error {
+  constructor(
+    message: string,
+    readonly status: 400 | 401 | 403 | 409 | 502,
+  ) {
+    super(message);
+    this.name = "ApprovalRequestError";
+  }
+}
+
+function hasBuiltUi(root: string): boolean {
+  return existsSync(join(root, "index.html"));
 }
